@@ -1,0 +1,11 @@
+{
+  "hostname": "DESKTOP-B0D2ETC",
+  "platform": "Windows",
+  "timestamp": "2026-07-16T15:14:20.269584+00:00",
+  "cpu_usage_percent": 8.6,
+  "gateway": {
+    "ip": "10.115.124.1",
+    "reachable": false,
+    "latency_ms": null
+  }
+}
