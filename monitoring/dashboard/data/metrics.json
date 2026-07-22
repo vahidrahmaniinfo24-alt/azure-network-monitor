@@ -1,11 +1,360 @@
 {
   "hostname": "DESKTOP-B0D2ETC",
   "platform": "Windows",
-  "timestamp": "2026-07-16T15:14:20.269584+00:00",
-  "cpu_usage_percent": 8.6,
+  "timestamp": "2026-07-22T17:46:05.023648+00:00",
+  "agent_version": "2.0.0",
+  "cpu_usage_percent": 17.9,
+  "memory": {
+    "percent": 77.2,
+    "used_gb": 12.11,
+    "total_gb": 15.69,
+    "available_gb": 3.58
+  },
+  "disk": {
+    "percent": 85.9,
+    "used_gb": 203.89,
+    "total_gb": 237.42,
+    "free_gb": 33.54
+  },
+  "network": {
+    "bytes_sent_delta": 8283,
+    "bytes_recv_delta": 9343,
+    "packets_sent_delta": 60313,
+    "packets_recv_delta": 64833,
+    "errors": 0,
+    "drops": 0,
+    "total_bytes_sent": 153327111,
+    "total_bytes_recv": 52599120
+  },
   "gateway": {
-    "ip": "192.168.1.1",
-    "reachable": false,
-    "latency_ms": null
-  }
+    "ip": "10.115.124.26",
+    "reachable": true,
+    "latency_ms": 13.0
+  },
+  "history": [
+    {
+      "timestamp": "2026-07-22T17:43:07.456624+00:00",
+      "cpu": 26.6,
+      "memory": 77.9,
+      "disk": 85.9,
+      "latency_ms": 3.0,
+      "bytes_sent": 0,
+      "bytes_recv": 0
+    },
+    {
+      "timestamp": "2026-07-22T17:43:12.494676+00:00",
+      "cpu": 31.7,
+      "memory": 80.9,
+      "disk": 85.9,
+      "latency_ms": 3.0,
+      "bytes_sent": 186076,
+      "bytes_recv": 317304
+    },
+    {
+      "timestamp": "2026-07-22T17:43:17.528774+00:00",
+      "cpu": 23.6,
+      "memory": 80.7,
+      "disk": 85.9,
+      "latency_ms": 5.0,
+      "bytes_sent": 104002,
+      "bytes_recv": 285399
+    },
+    {
+      "timestamp": "2026-07-22T17:43:22.574093+00:00",
+      "cpu": 19.0,
+      "memory": 80.4,
+      "disk": 85.9,
+      "latency_ms": 6.0,
+      "bytes_sent": 21822,
+      "bytes_recv": 128337
+    },
+    {
+      "timestamp": "2026-07-22T17:43:27.625656+00:00",
+      "cpu": 27.5,
+      "memory": 80.3,
+      "disk": 85.9,
+      "latency_ms": 5.0,
+      "bytes_sent": 71944,
+      "bytes_recv": 223609
+    },
+    {
+      "timestamp": "2026-07-22T17:43:32.747265+00:00",
+      "cpu": 22.8,
+      "memory": 79.7,
+      "disk": 85.9,
+      "latency_ms": 41.0,
+      "bytes_sent": 29040,
+      "bytes_recv": 147368
+    },
+    {
+      "timestamp": "2026-07-22T17:43:37.827298+00:00",
+      "cpu": 24.8,
+      "memory": 78.4,
+      "disk": 85.9,
+      "latency_ms": 9.0,
+      "bytes_sent": 25821,
+      "bytes_recv": 132968
+    },
+    {
+      "timestamp": "2026-07-22T17:43:42.902754+00:00",
+      "cpu": 27.8,
+      "memory": 78.3,
+      "disk": 85.9,
+      "latency_ms": 8.0,
+      "bytes_sent": 49610,
+      "bytes_recv": 103680
+    },
+    {
+      "timestamp": "2026-07-22T17:43:47.999398+00:00",
+      "cpu": 21.5,
+      "memory": 78.5,
+      "disk": 85.9,
+      "latency_ms": 19.0,
+      "bytes_sent": 356404,
+      "bytes_recv": 13019
+    },
+    {
+      "timestamp": "2026-07-22T17:43:53.132129+00:00",
+      "cpu": 13.4,
+      "memory": 78.0,
+      "disk": 85.9,
+      "latency_ms": 35.0,
+      "bytes_sent": 2634,
+      "bytes_recv": 5380
+    },
+    {
+      "timestamp": "2026-07-22T17:43:58.214168+00:00",
+      "cpu": 23.6,
+      "memory": 78.0,
+      "disk": 85.9,
+      "latency_ms": 15.0,
+      "bytes_sent": 357586,
+      "bytes_recv": 19843
+    },
+    {
+      "timestamp": "2026-07-22T17:44:03.289061+00:00",
+      "cpu": 15.1,
+      "memory": 77.6,
+      "disk": 85.9,
+      "latency_ms": 12.0,
+      "bytes_sent": 5253,
+      "bytes_recv": 2903
+    },
+    {
+      "timestamp": "2026-07-22T17:44:08.360747+00:00",
+      "cpu": 22.8,
+      "memory": 77.6,
+      "disk": 85.9,
+      "latency_ms": 9.0,
+      "bytes_sent": 10383,
+      "bytes_recv": 60349
+    },
+    {
+      "timestamp": "2026-07-22T17:44:13.434558+00:00",
+      "cpu": 22.3,
+      "memory": 77.6,
+      "disk": 85.9,
+      "latency_ms": 7.0,
+      "bytes_sent": 363211,
+      "bytes_recv": 16415
+    },
+    {
+      "timestamp": "2026-07-22T17:44:18.512217+00:00",
+      "cpu": 18.4,
+      "memory": 77.6,
+      "disk": 85.9,
+      "latency_ms": 7.0,
+      "bytes_sent": 7368,
+      "bytes_recv": 14342
+    },
+    {
+      "timestamp": "2026-07-22T17:44:23.599355+00:00",
+      "cpu": 22.8,
+      "memory": 77.4,
+      "disk": 85.9,
+      "latency_ms": 6.0,
+      "bytes_sent": 10329,
+      "bytes_recv": 60968
+    },
+    {
+      "timestamp": "2026-07-22T17:44:28.691858+00:00",
+      "cpu": 24.6,
+      "memory": 77.5,
+      "disk": 85.9,
+      "latency_ms": 24.0,
+      "bytes_sent": 26163,
+      "bytes_recv": 119310
+    },
+    {
+      "timestamp": "2026-07-22T17:44:33.759266+00:00",
+      "cpu": 29.2,
+      "memory": 77.8,
+      "disk": 85.9,
+      "latency_ms": 30.0,
+      "bytes_sent": 369990,
+      "bytes_recv": 26932
+    },
+    {
+      "timestamp": "2026-07-22T17:44:38.824365+00:00",
+      "cpu": 16.5,
+      "memory": 77.8,
+      "disk": 85.9,
+      "latency_ms": 11.0,
+      "bytes_sent": 3466,
+      "bytes_recv": 28370
+    },
+    {
+      "timestamp": "2026-07-22T17:44:43.938796+00:00",
+      "cpu": 27.5,
+      "memory": 77.3,
+      "disk": 85.9,
+      "latency_ms": 42.0,
+      "bytes_sent": 28174,
+      "bytes_recv": 203172
+    },
+    {
+      "timestamp": "2026-07-22T17:44:49.002730+00:00",
+      "cpu": 19.8,
+      "memory": 77.5,
+      "disk": 85.9,
+      "latency_ms": 7.0,
+      "bytes_sent": 11189,
+      "bytes_recv": 92366
+    },
+    {
+      "timestamp": "2026-07-22T17:44:54.077679+00:00",
+      "cpu": 19.9,
+      "memory": 77.6,
+      "disk": 85.9,
+      "latency_ms": 8.0,
+      "bytes_sent": 369821,
+      "bytes_recv": 52724
+    },
+    {
+      "timestamp": "2026-07-22T17:44:59.131226+00:00",
+      "cpu": 15.2,
+      "memory": 77.9,
+      "disk": 85.9,
+      "latency_ms": 6.0,
+      "bytes_sent": 2721,
+      "bytes_recv": 13319
+    },
+    {
+      "timestamp": "2026-07-22T17:45:04.200875+00:00",
+      "cpu": 20.6,
+      "memory": 78.2,
+      "disk": 85.9,
+      "latency_ms": 20.0,
+      "bytes_sent": 17488,
+      "bytes_recv": 10916
+    },
+    {
+      "timestamp": "2026-07-22T17:45:09.272940+00:00",
+      "cpu": 19.8,
+      "memory": 77.5,
+      "disk": 85.9,
+      "latency_ms": 5.0,
+      "bytes_sent": 369311,
+      "bytes_recv": 12629
+    },
+    {
+      "timestamp": "2026-07-22T17:45:14.326526+00:00",
+      "cpu": 20.2,
+      "memory": 77.4,
+      "disk": 85.9,
+      "latency_ms": 8.0,
+      "bytes_sent": 9138,
+      "bytes_recv": 9369
+    },
+    {
+      "timestamp": "2026-07-22T17:45:19.367220+00:00",
+      "cpu": 25.0,
+      "memory": 77.3,
+      "disk": 85.9,
+      "latency_ms": 5.0,
+      "bytes_sent": 371217,
+      "bytes_recv": 29222
+    },
+    {
+      "timestamp": "2026-07-22T17:45:24.408723+00:00",
+      "cpu": 25.3,
+      "memory": 77.3,
+      "disk": 85.9,
+      "latency_ms": 6.0,
+      "bytes_sent": 371184,
+      "bytes_recv": 18859
+    },
+    {
+      "timestamp": "2026-07-22T17:45:29.506348+00:00",
+      "cpu": 19.9,
+      "memory": 77.4,
+      "disk": 85.9,
+      "latency_ms": 14.0,
+      "bytes_sent": 29316,
+      "bytes_recv": 32705
+    },
+    {
+      "timestamp": "2026-07-22T17:45:34.580857+00:00",
+      "cpu": 21.7,
+      "memory": 77.5,
+      "disk": 85.9,
+      "latency_ms": 6.0,
+      "bytes_sent": 15243,
+      "bytes_recv": 58591
+    },
+    {
+      "timestamp": "2026-07-22T17:45:39.664412+00:00",
+      "cpu": 22.5,
+      "memory": 77.1,
+      "disk": 85.9,
+      "latency_ms": 15.0,
+      "bytes_sent": 3984,
+      "bytes_recv": 30660
+    },
+    {
+      "timestamp": "2026-07-22T17:45:44.750273+00:00",
+      "cpu": 13.1,
+      "memory": 77.1,
+      "disk": 85.9,
+      "latency_ms": 9.0,
+      "bytes_sent": 7913,
+      "bytes_recv": 14446
+    },
+    {
+      "timestamp": "2026-07-22T17:45:49.831446+00:00",
+      "cpu": 16.3,
+      "memory": 77.0,
+      "disk": 85.9,
+      "latency_ms": 5.0,
+      "bytes_sent": 1816,
+      "bytes_recv": 3228
+    },
+    {
+      "timestamp": "2026-07-22T17:45:54.898335+00:00",
+      "cpu": 13.5,
+      "memory": 77.0,
+      "disk": 85.9,
+      "latency_ms": 9.0,
+      "bytes_sent": 4957,
+      "bytes_recv": 5545
+    },
+    {
+      "timestamp": "2026-07-22T17:45:59.963668+00:00",
+      "cpu": 12.8,
+      "memory": 77.0,
+      "disk": 85.9,
+      "latency_ms": 7.0,
+      "bytes_sent": 1119,
+      "bytes_recv": 3935
+    },
+    {
+      "timestamp": "2026-07-22T17:46:05.023648+00:00",
+      "cpu": 17.9,
+      "memory": 77.2,
+      "disk": 85.9,
+      "latency_ms": 13.0,
+      "bytes_sent": 8283,
+      "bytes_recv": 9343
+    }
+  ]
 }

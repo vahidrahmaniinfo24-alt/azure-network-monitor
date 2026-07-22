@@ -4,6 +4,10 @@ Hybrid Network Monitoring Dashboard (Streamlit).
 Reads the latest metrics JSON produced by the agent and renders a
 professional, real-time monitoring UI with live charts and status cards.
 
+The dashboard is resilient to missing files, stale data, and JSON
+parse errors — it surfaces connection status and an error log in the
+sidebar so users always know whether the agent is alive.
+
 Dependencies:
     pip install streamlit pandas
 
@@ -13,13 +17,29 @@ Run with:
 
 import json
 import os
-from datetime import datetime, timedelta
+import traceback
+from datetime import datetime, timedelta, timezone
 
 import pandas as pd
 import streamlit as st
 
-METRICS_FILE = os.path.join(os.path.dirname(__file__), "data", "metrics.json")
+# ---------------------------------------------------------------------------
+# Path configuration — override with METRICS_FILE env var for cloud deploy
+# ---------------------------------------------------------------------------
 
+METRICS_FILE = os.environ.get(
+    "METRICS_FILE",
+    os.path.join(os.path.dirname(__file__), "data", "metrics.json"),
+)
+
+STALENESS_THRESHOLD = int(os.environ.get("STALENESS_THRESHOLD", "30"))
+
+MAX_ERROR_LOG = 20
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
 
 def _format_bytes(n: int) -> str:
     for unit in ("B", "KB", "MB", "GB"):
@@ -29,40 +49,163 @@ def _format_bytes(n: int) -> str:
     return f"{n:.1f} TB"
 
 
+def _init_state() -> None:
+    if "error_log" not in st.session_state:
+        st.session_state.error_log = []
+    if "last_ok_load" not in st.session_state:
+        st.session_state.last_ok_load = None
+
+
+def _log_error(msg: str) -> None:
+    ts = datetime.now(timezone.utc).strftime("%H:%M:%S")
+    entry = f"[{ts}] {msg}"
+    log = st.session_state.error_log
+    log.append(entry)
+    if len(log) > MAX_ERROR_LOG:
+        log.pop(0)
+
+
+# ---------------------------------------------------------------------------
+# Robust JSON loader
+# ---------------------------------------------------------------------------
+
 def load_metrics() -> dict | None:
+    """Load and validate the metrics JSON with full error handling.
+
+    Handles: missing file, permission denied, truncated / partial write,
+    invalid JSON, missing keys, and stale timestamps.
+
+    Returns the parsed dict on success, None on any failure.
+    Updates ``st.session_state.conn_status`` and ``st.session_state.staleness``.
+    """
+    _init_state()
+    ss = st.session_state
+
+    # -- file existence (handles symbolic-link races too) --
     if not os.path.exists(METRICS_FILE):
+        ss.conn_status = "no_file"
+        ss.staleness = None
+        _log_error(f"File not found: {METRICS_FILE}")
         return None
+
+    # -- read + parse --
     try:
         with open(METRICS_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except (json.JSONDecodeError, OSError):
+            raw = f.read()
+    except PermissionError:
+        ss.conn_status = "permission_error"
+        ss.staleness = None
+        _log_error("Permission denied reading metrics file")
+        return None
+    except OSError as exc:
+        ss.conn_status = "read_error"
+        ss.staleness = None
+        _log_error(f"OS error reading file: {exc}")
         return None
 
+    if not raw.strip():
+        ss.conn_status = "empty_file"
+        ss.staleness = None
+        _log_error("Metrics file is empty (agent may be mid-write)")
+        return None
 
-def history_to_df(history: list[dict]) -> pd.DataFrame:
-    if not history:
-        return pd.DataFrame()
-    df = pd.DataFrame(history)
-    df["timestamp"] = pd.to_datetime(df["timestamp"])
-    df.set_index("timestamp", inplace=True)
-    return df
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        ss.conn_status = "parse_error"
+        ss.staleness = None
+        _log_error(f"JSON parse error: {exc}")
+        return None
+
+    # -- required keys --
+    if "timestamp" not in data or "cpu_usage_percent" not in data:
+        ss.conn_status = "invalid_schema"
+        ss.staleness = None
+        _log_error("Missing required fields (timestamp / cpu_usage_percent)")
+        return None
+
+    # -- staleness check --
+    try:
+        ts = datetime.fromisoformat(data["timestamp"])
+        now = datetime.now(timezone.utc)
+        age = (now - ts).total_seconds()
+        ss.data_timestamp = ts
+        ss.staleness = age
+
+        if age <= STALENESS_THRESHOLD:
+            ss.conn_status = "connected"
+        elif age <= STALENESS_THRESHOLD * 4:
+            ss.conn_status = "stale"
+        else:
+            ss.conn_status = "disconnected"
+    except (ValueError, TypeError):
+        ss.conn_status = "bad_timestamp"
+        ss.staleness = None
+        _log_error(f"Unparseable timestamp: {data.get('timestamp')}")
+
+    ss.last_ok_load = datetime.now(timezone.utc)
+    return data
 
 
 # ---------------------------------------------------------------------------
-# Sidebar (outside fragment — reruns only on full page rerun / widget change)
+# Sidebar
 # ---------------------------------------------------------------------------
 
-def render_sidebar() -> None:
+def _render_sidebar(data: dict | None) -> None:
     with st.sidebar:
         st.markdown("### :material/monitoring: Monitor controls")
         st.toggle("Auto-refresh (3 s)", value=True, key="auto_refresh")
 
-        data = load_metrics()
+        # -- connection status --
+        st.divider()
+        st.markdown("### :material/link: Agent status")
+
+        status = st.session_state.get("conn_status", "unknown")
+        labels = {
+            "connected":      (":material/check_circle:", "Connected",    "green"),
+            "stale":          (":material/warning:",       "Stale",        "orange"),
+            "disconnected":   (":material/error:",         "Disconnected", "red"),
+            "no_file":        (":material/folder_off:",    "No file",      "red"),
+            "empty_file":     (":material/broken_image:",  "Empty file",   "orange"),
+            "parse_error":    (":material/data_alert:",    "Parse error",  "red"),
+            "permission_error": (":material/lock:",        "Locked",       "red"),
+            "read_error":     (":material/cloud_off:",     "Read error",   "red"),
+            "invalid_schema": (":material/schema:",        "Bad schema",   "red"),
+            "bad_timestamp":  (":material/schedule:",      "Bad timestamp","orange"),
+            "unknown":        (":material/help:",          "Unknown",      "orange"),
+        }
+        icon, text, color = labels.get(status, labels["unknown"])
+        st.badge(text, icon=icon, color=color)
+
+        age = st.session_state.get("staleness")
+        if age is not None:
+            if age < 5:
+                st.caption(f"Data age: **{age:.0f} s** (fresh)")
+            elif age < STALENESS_THRESHOLD:
+                st.caption(f"Data age: **{age:.0f} s**")
+            else:
+                st.caption(f"Data age: **{age:.0f} s** (stale)")
+        elif status != "connected":
+            st.caption("No fresh data available")
+
+        # -- error log --
+        log = st.session_state.get("error_log", [])
+        if log:
+            st.divider()
+            with st.popover(
+                f":material/error_outline: Errors ({len(log)})",
+                type="tertiary",
+            ):
+                for entry in reversed(log):
+                    st.caption(entry)
+
+        # -- system info (only when data present) --
         if data:
             st.divider()
             st.markdown("### :material/info: System info")
             st.caption(f"**Host:** {data.get('hostname', 'unknown')}")
             st.caption(f"**Platform:** {data.get('platform', 'unknown')}")
+            st.caption(f"**Agent:** v{data.get('agent_version', '?')}")
             st.caption(f"**Gateway:** {data.get('gateway', {}).get('ip', 'N/A')}")
 
             ts = data.get("timestamp", "")
@@ -91,7 +234,7 @@ def render_sidebar() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Auto-refreshing fragment
+# Auto-refreshing live panel
 # ---------------------------------------------------------------------------
 
 @st.fragment(run_every=timedelta(seconds=3))
@@ -99,10 +242,19 @@ def render_live_panel() -> None:
     data = load_metrics()
 
     if data is None:
-        st.warning(
-            "No metrics file found. Start the agent with "
-            "`python monitoring/agent/agent.py`."
-        )
+        status = st.session_state.get("conn_status", "unknown")
+        if status == "no_file":
+            st.warning(
+                "**Agent not writing data.**  \n"
+                "Start the agent with  `python monitoring/agent/agent.py`  \n"
+                "or set the `METRICS_FILE` environment variable to an existing path."
+            )
+        elif status == "empty_file":
+            st.warning("Metrics file exists but is empty. The agent may be starting up.")
+        elif status in ("parse_error", "invalid_schema"):
+            st.error("Metrics file is corrupted. The agent may be mid-write or crashed.")
+        else:
+            st.warning("Unable to load metrics. Check the sidebar error log for details.")
         return
 
     gateway = data.get("gateway", {})
@@ -113,27 +265,32 @@ def render_live_panel() -> None:
     reachable = gateway.get("reachable", False)
     latency = gateway.get("latency_ms")
 
+    # --- stale-data banner ---
+    age = st.session_state.get("staleness")
+    if age is not None and age > STALENESS_THRESHOLD:
+        st.error(
+            f":material/warning: **Data is {age:.0f}s old** "
+            f"(threshold {STALENESS_THRESHOLD}s). The agent may have stopped."
+        )
+
     # --- KPI row ---
     st.markdown("#### :material/dashboard: Live metrics")
 
     with st.container(horizontal=True):
         with st.container(border=True):
             st.metric(":material/memory: CPU", f"{cpu}%")
-
         with st.container(border=True):
             st.metric(
                 ":material/ram: Memory",
                 f"{mem.get('percent', 0)}%",
                 f"{mem.get('used_gb', 0)} / {mem.get('total_gb', 0)} GB",
             )
-
         with st.container(border=True):
             st.metric(
                 ":material/hard_drive: Disk",
                 f"{disk.get('percent', 0)}%",
                 f"{disk.get('used_gb', 0)} / {disk.get('total_gb', 0)} GB",
             )
-
         with st.container(border=True):
             gw_value = f"{latency} ms" if latency is not None else "\u2014"
             gw_delta = "reachable" if reachable else "unreachable"
@@ -175,28 +332,27 @@ def render_live_panel() -> None:
         else:
             st.badge("Gateway DOWN", icon=":material/error:", color="red")
 
-    # --- CPU & Memory history chart ---
-    st.markdown("#### :material/show_chart: CPU & memory history")
-
+    # --- History charts ---
     history = data.get("history", [])
-    df = history_to_df(history)
+    df = _history_to_df(history)
 
+    st.markdown("#### :material/show_chart: CPU & memory history")
     if len(df) >= 2:
-        chart_df = df[["cpu", "memory"]].rename(
-            columns={"cpu": "CPU %", "memory": "Memory %"}
+        st.line_chart(
+            df[["cpu", "memory"]].rename(columns={"cpu": "CPU %", "memory": "Memory %"}),
+            height=280,
         )
-        st.line_chart(chart_df, height=280)
     else:
         st.caption("Collecting data\u2026 chart appears after a few readings.")
 
-    # --- Network traffic chart ---
     st.markdown("#### :material/network_check: Network traffic")
-
     if len(df) >= 2:
-        net_df = df[["bytes_sent", "bytes_recv"]].rename(
-            columns={"bytes_sent": "Sent (B/s)", "bytes_recv": "Recv (B/s)"}
+        st.area_chart(
+            df[["bytes_sent", "bytes_recv"]].rename(
+                columns={"bytes_sent": "Sent (B/s)", "bytes_recv": "Recv (B/s)"}
+            ),
+            height=240,
         )
-        st.area_chart(net_df, height=240)
         st.caption(
             f"Throughput  \u2014  "
             f"sent: **{_format_bytes(int(net.get('bytes_sent_delta', 0)))}**/s"
@@ -207,9 +363,7 @@ def render_live_panel() -> None:
     else:
         st.caption("Collecting data\u2026 chart appears after a few readings.")
 
-    # --- Latency chart ---
     st.markdown("#### :material/speed: Gateway latency history")
-
     if not df.empty and "latency_ms" in df.columns:
         lat = df["latency_ms"].dropna()
         if len(lat) >= 2:
@@ -224,6 +378,7 @@ def render_live_panel() -> None:
         flat = {
             "hostname": data.get("hostname"),
             "platform": data.get("platform"),
+            "agent_version": data.get("agent_version"),
             "timestamp": data.get("timestamp"),
             "cpu_%": cpu,
             "ram_%": mem.get("percent"),
@@ -243,6 +398,15 @@ def render_live_panel() -> None:
     st.caption(f"Last updated: {data.get('timestamp', 'unknown')}")
 
 
+def _history_to_df(history: list[dict]) -> pd.DataFrame:
+    if not history:
+        return pd.DataFrame()
+    df = pd.DataFrame(history)
+    df["timestamp"] = pd.to_datetime(df["timestamp"])
+    df.set_index("timestamp", inplace=True)
+    return df
+
+
 # ---------------------------------------------------------------------------
 # Page entry point
 # ---------------------------------------------------------------------------
@@ -257,7 +421,9 @@ def main() -> None:
     st.title(":material/monitoring: Hybrid network monitor")
     st.caption("Real-time system metrics collected by the Python agent")
 
-    render_sidebar()
+    # Load once for the sidebar (outside fragment so it doesn't flicker)
+    data = load_metrics()
+    _render_sidebar(data)
     render_live_panel()
 
 

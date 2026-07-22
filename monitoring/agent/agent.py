@@ -31,13 +31,14 @@ import psutil
 
 import config
 
+AGENT_VERSION = "2.0.0"
+
 
 # ---------------------------------------------------------------------------
 # Gateway auto-detection (cross-platform)
 # ---------------------------------------------------------------------------
 
 def _detect_gateway_windows() -> str | None:
-    """Parse ``route print 0.0.0.0`` to find the default gateway."""
     try:
         result = subprocess.run(
             ["route", "print", "0.0.0.0"],
@@ -59,7 +60,6 @@ def _detect_gateway_windows() -> str | None:
 
 
 def _detect_gateway_linux() -> str | None:
-    """Parse ``ip route show default`` for the gateway address."""
     try:
         result = subprocess.run(
             ["ip", "route", "show", "default"],
@@ -74,7 +74,6 @@ def _detect_gateway_linux() -> str | None:
 
 
 def _detect_gateway_macos() -> str | None:
-    """Parse ``netstat -nr`` for the default route."""
     try:
         result = subprocess.run(
             ["netstat", "-nr"],
@@ -96,7 +95,6 @@ def _detect_gateway_macos() -> str | None:
 
 
 def detect_default_gateway() -> str | None:
-    """Auto-detect the default gateway from OS routing tables."""
     if sys.platform == "win32":
         return _detect_gateway_windows()
     elif sys.platform == "darwin":
@@ -106,7 +104,6 @@ def detect_default_gateway() -> str | None:
 
 
 def resolve_gateway() -> str:
-    """Return the gateway IP: auto-detect first, fall back to config."""
     gw = detect_default_gateway()
     if gw:
         return gw
@@ -123,16 +120,12 @@ def resolve_gateway() -> str:
 # ---------------------------------------------------------------------------
 
 def ping_gateway(gateway: str) -> dict:
-    """Ping the gateway and report reachability + latency in ms."""
     try:
         if sys.platform == "win32":
             cmd = ["ping", "-n", "1", "-w", "2000", gateway]
         else:
             cmd = ["ping", "-c", "1", "-W", "2", gateway]
-
-        result = subprocess.run(
-            cmd, capture_output=True, text=True, timeout=5,
-        )
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
         reachable = result.returncode == 0
         latency_ms = None
         if reachable:
@@ -149,12 +142,10 @@ def ping_gateway(gateway: str) -> dict:
 # ---------------------------------------------------------------------------
 
 def get_cpu_usage() -> float:
-    """Return current CPU utilization as a percentage (0-100)."""
     return round(psutil.cpu_percent(interval=None), 2)
 
 
 def get_memory_usage() -> dict:
-    """Return RAM usage stats."""
     mem = psutil.virtual_memory()
     return {
         "percent": round(mem.percent, 1),
@@ -165,11 +156,7 @@ def get_memory_usage() -> dict:
 
 
 def get_disk_usage() -> dict:
-    """Return disk usage for the system drive."""
-    if sys.platform == "win32":
-        path = "C:\\"
-    else:
-        path = "/"
+    path = "C:\\" if sys.platform == "win32" else "/"
     usage = psutil.disk_usage(path)
     return {
         "percent": round(usage.percent, 1),
@@ -180,11 +167,6 @@ def get_disk_usage() -> dict:
 
 
 def get_network_io(prev_counters: dict | None) -> tuple[dict, dict]:
-    """Return network I/O stats and the new counter snapshot.
-
-    Returns (io_stats, new_counters) where io_stats contains
-    bytes_sent/recv deltas since the previous reading.
-    """
     counters = psutil.net_io_counters()
     current = {
         "bytes_sent": counters.bytes_sent,
@@ -197,23 +179,13 @@ def get_network_io(prev_counters: dict | None) -> tuple[dict, dict]:
         "dropout": counters.dropout,
     }
     if prev_counters is None:
-        delta = {
-            "bytes_sent": 0,
-            "bytes_recv": 0,
-            "packets_sent": 0,
-            "packets_recv": 0,
-            "errin": 0,
-            "errout": 0,
-            "dropin": 0,
-            "dropout": 0,
-        }
+        delta = {k: 0 for k in current}
     else:
         delta = {k: current[k] - prev_counters.get(k, 0) for k in current}
     return delta, current
 
 
 def format_bytes(n: int) -> str:
-    """Human-readable byte count."""
     for unit in ("B", "KB", "MB", "GB"):
         if abs(n) < 1024:
             return f"{n:.1f} {unit}"
@@ -222,11 +194,10 @@ def format_bytes(n: int) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Collect + write
+# Collect + write (with retry)
 # ---------------------------------------------------------------------------
 
 def collect_metrics() -> dict:
-    """Gather all metrics into a single serializable payload."""
     hostname = config.HOSTNAME or socket.gethostname()
     ping = ping_gateway(_GATEWAY_IP)
     mem = get_memory_usage()
@@ -237,6 +208,7 @@ def collect_metrics() -> dict:
         "hostname": hostname,
         "platform": platform.system(),
         "timestamp": datetime.now(timezone.utc).isoformat(),
+        "agent_version": AGENT_VERSION,
         "cpu_usage_percent": get_cpu_usage(),
         "memory": mem,
         "disk": disk,
@@ -258,21 +230,37 @@ def collect_metrics() -> dict:
     }
 
 
-def write_metrics(payload: dict, path: str) -> None:
-    """Write metrics atomically so the dashboard never reads half-written JSON."""
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    dir_name = os.path.dirname(path)
-    fd, tmp_path = tempfile.mkstemp(dir=dir_name, suffix=".tmp")
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            json.dump(payload, f, indent=2)
-        os.replace(tmp_path, path)
-    except BaseException:
+def write_metrics(payload: dict, path: str, retries: int = 3) -> None:
+    """Write metrics with retry logic.
+
+    Uses tempfile + os.replace for atomicity.  On Windows the target
+    may be momentarily locked by an antivirus scanner or the dashboard
+    process, so we retry with short sleeps.
+    """
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    dir_name = os.path.dirname(path) or "."
+
+    for attempt in range(1, retries + 1):
+        fd, tmp_path = tempfile.mkstemp(dir=dir_name, suffix=".tmp")
         try:
-            os.unlink(tmp_path)
-        except OSError:
-            pass
-        raise
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                json.dump(payload, f, indent=2)
+            os.replace(tmp_path, path)
+            return  # success
+        except (PermissionError, OSError) as exc:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+            if attempt == retries:
+                raise
+            time.sleep(0.2 * attempt)
+        except BaseException:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+            raise
 
 
 # ---------------------------------------------------------------------------
@@ -289,30 +277,33 @@ def main() -> None:
 
     _HISTORY = collections.deque(maxlen=config.HISTORY_MAX_POINTS)
 
-    _GATEWAY_IP = resolve_gateway()
+    try:
+        _GATEWAY_IP = resolve_gateway()
+    except RuntimeError as exc:
+        print(f"[agent] FATAL: {exc}")
+        sys.exit(1)
+
     psutil.cpu_percent(interval=None)
 
     print(
-        f"[agent] Starting monitoring -> gateway {_GATEWAY_IP}, "
-        f"interval {config.INTERVAL_SECONDS}s, "
-        f"history {config.HISTORY_MAX_POINTS} points"
+        f"[agent] v{AGENT_VERSION} starting | gateway {_GATEWAY_IP} | "
+        f"interval {config.INTERVAL_SECONDS}s | "
+        f"history {config.HISTORY_MAX_POINTS} pts | "
+        f"metrics -> {config.METRICS_FILE}"
     )
 
+    consecutive_errors = 0
     while True:
         try:
             payload = collect_metrics()
             _PREV_NET_COUNTERS = {
                 "bytes_sent": payload["network"]["total_bytes_sent"],
                 "bytes_recv": payload["network"]["total_bytes_recv"],
-                "packets_sent": 0,
-                "packets_recv": 0,
-                "errin": 0,
-                "errout": 0,
-                "dropin": 0,
-                "dropout": 0,
+                "packets_sent": 0, "packets_recv": 0,
+                "errin": 0, "errout": 0, "dropin": 0, "dropout": 0,
             }
 
-            history_point = {
+            _HISTORY.append({
                 "timestamp": payload["timestamp"],
                 "cpu": payload["cpu_usage_percent"],
                 "memory": payload["memory"]["percent"],
@@ -320,22 +311,22 @@ def main() -> None:
                 "latency_ms": payload["gateway"]["latency_ms"],
                 "bytes_sent": payload["network"]["bytes_sent_delta"],
                 "bytes_recv": payload["network"]["bytes_recv_delta"],
-            }
-            _HISTORY.append(history_point)
+            })
 
             output = {**payload, "history": list(_HISTORY)}
             write_metrics(output, config.METRICS_FILE)
 
-            gw_status = "OK" if payload["gateway"]["reachable"] else "DOWN"
+            consecutive_errors = 0
+            gw = "OK" if payload["gateway"]["reachable"] else "DOWN"
             print(
-                f"[agent] {payload['hostname']} | "
-                f"CPU {payload['cpu_usage_percent']}% | "
+                f"[agent] CPU {payload['cpu_usage_percent']}% | "
                 f"RAM {payload['memory']['percent']}% | "
-                f"Disk {payload['disk']['percent']}% | "
-                f"GW {gw_status}"
+                f"Disk {payload['disk']['percent']}% | GW {gw}"
             )
         except Exception as exc:
-            print(f"[agent] collection error: {exc}")
+            consecutive_errors += 1
+            print(f"[agent] error #{consecutive_errors}: {exc}")
+
         time.sleep(config.INTERVAL_SECONDS)
 
 
