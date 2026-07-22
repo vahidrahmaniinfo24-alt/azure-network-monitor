@@ -1,15 +1,22 @@
 """
-Hybrid Network Monitoring Agent.
+Hybrid Network Monitoring Agent – two-step local-first architecture.
 
-Collects system metrics:
-  - CPU usage percentage
-  - Memory (RAM) usage
-  - Disk usage
-  - Network traffic (bytes sent/received per interval)
-  - Ping status / latency to the network gateway
+Step 1 – LOCAL COLLECT
+    Every cycle the agent gathers CPU, RAM, disk, network I/O and a
+    gateway ping, then writes a complete JSON payload to a *local*
+    scratch file (LOCAL_FILE).  This write is fast, atomic, and
+    guaranteed to succeed even when the gateway is unreachable — the
+    gateway status is simply recorded as ``reachable: false``.
 
-The agent writes the latest reading plus a rolling history window to a
-JSON file that the Streamlit dashboard consumes.
+Step 2 – SYNC / PUSH
+    Immediately after the local write the agent copies (or runs a
+    user-defined shell command) to move the data to OUTPUT_FILE — the
+    file the Streamlit dashboard reads.  If the sync fails the local
+    file is still intact and the agent keeps running.
+
+Gateway failures NEVER crash the agent.  Detection and ping are each
+wrapped in their own ``try/except`` blocks; on any error the gateway
+is marked unreachable and collection continues.
 
 Dependencies:
     pip install psutil
@@ -20,6 +27,7 @@ import json
 import os
 import platform
 import re
+import shutil
 import socket
 import subprocess
 import sys
@@ -31,12 +39,12 @@ import psutil
 
 import config
 
-AGENT_VERSION = "2.0.0"
+AGENT_VERSION = "3.0.0"
 
 
-# ---------------------------------------------------------------------------
-# Gateway auto-detection (cross-platform)
-# ---------------------------------------------------------------------------
+# ===================================================================
+# Gateway helpers – all fault-tolerant, never raise
+# ===================================================================
 
 def _detect_gateway_windows() -> str | None:
     try:
@@ -94,32 +102,20 @@ def _detect_gateway_macos() -> str | None:
     return None
 
 
-def detect_default_gateway() -> str | None:
+def _detect_gateway() -> str | None:
+    """Return the OS default gateway or ``None``.  Never raises."""
     if sys.platform == "win32":
         return _detect_gateway_windows()
     elif sys.platform == "darwin":
         return _detect_gateway_macos()
-    else:
-        return _detect_gateway_linux()
+    return _detect_gateway_linux()
 
 
-def resolve_gateway() -> str:
-    gw = detect_default_gateway()
-    if gw:
-        return gw
-    if config.GATEWAY_IP:
-        return config.GATEWAY_IP
-    raise RuntimeError(
-        "Could not auto-detect the default gateway and "
-        "GATEWAY_IP is not set in config.py"
-    )
+def _ping_gateway(gateway: str) -> dict:
+    """Ping *gateway* once and return reachability + latency.
 
-
-# ---------------------------------------------------------------------------
-# Cross-platform ping
-# ---------------------------------------------------------------------------
-
-def ping_gateway(gateway: str) -> dict:
+    Returns ``{"reachable": False, "latency_ms": None}`` on any error.
+    """
     try:
         if sys.platform == "win32":
             cmd = ["ping", "-n", "1", "-w", "2000", gateway]
@@ -129,87 +125,93 @@ def ping_gateway(gateway: str) -> dict:
         reachable = result.returncode == 0
         latency_ms = None
         if reachable:
-            match = re.search(r"time[=<](\d+(?:\.\d+)?)\s*ms", result.stdout)
-            if match:
-                latency_ms = float(match.group(1))
+            m = re.search(r"time[=<](\d+(?:\.\d+)?)\s*ms", result.stdout)
+            if m:
+                latency_ms = float(m.group(1))
         return {"reachable": reachable, "latency_ms": latency_ms}
     except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
         return {"reachable": False, "latency_ms": None}
 
 
-# ---------------------------------------------------------------------------
-# System metrics
-# ---------------------------------------------------------------------------
+# ===================================================================
+# System-metric collectors (always succeed on any OS)
+# ===================================================================
 
-def get_cpu_usage() -> float:
+def _get_cpu() -> float:
     return round(psutil.cpu_percent(interval=None), 2)
 
 
-def get_memory_usage() -> dict:
-    mem = psutil.virtual_memory()
+def _get_memory() -> dict:
+    m = psutil.virtual_memory()
     return {
-        "percent": round(mem.percent, 1),
-        "used_gb": round(mem.used / (1024 ** 3), 2),
-        "total_gb": round(mem.total / (1024 ** 3), 2),
-        "available_gb": round(mem.available / (1024 ** 3), 2),
+        "percent": round(m.percent, 1),
+        "used_gb": round(m.used / (1024 ** 3), 2),
+        "total_gb": round(m.total / (1024 ** 3), 2),
+        "available_gb": round(m.available / (1024 ** 3), 2),
     }
 
 
-def get_disk_usage() -> dict:
+def _get_disk() -> dict:
     path = "C:\\" if sys.platform == "win32" else "/"
-    usage = psutil.disk_usage(path)
+    u = psutil.disk_usage(path)
     return {
-        "percent": round(usage.percent, 1),
-        "used_gb": round(usage.used / (1024 ** 3), 2),
-        "total_gb": round(usage.total / (1024 ** 3), 2),
-        "free_gb": round(usage.free / (1024 ** 3), 2),
+        "percent": round(u.percent, 1),
+        "used_gb": round(u.used / (1024 ** 3), 2),
+        "total_gb": round(u.total / (1024 ** 3), 2),
+        "free_gb": round(u.free / (1024 ** 3), 2),
     }
 
 
-def get_network_io(prev_counters: dict | None) -> tuple[dict, dict]:
-    counters = psutil.net_io_counters()
-    current = {
-        "bytes_sent": counters.bytes_sent,
-        "bytes_recv": counters.bytes_recv,
-        "packets_sent": counters.packets_sent,
-        "packets_recv": counters.packets_recv,
-        "errin": counters.errin,
-        "errout": counters.errout,
-        "dropin": counters.dropin,
-        "dropout": counters.dropout,
+def _get_network(prev: dict | None) -> tuple[dict, dict]:
+    c = psutil.net_io_counters()
+    cur = {
+        "bytes_sent": c.bytes_sent, "bytes_recv": c.bytes_recv,
+        "packets_sent": c.packets_sent, "packets_recv": c.packets_recv,
+        "errin": c.errin, "errout": c.errout,
+        "dropin": c.dropin, "dropout": c.dropout,
     }
-    if prev_counters is None:
-        delta = {k: 0 for k in current}
+    if prev is None:
+        delta = {k: 0 for k in cur}
     else:
-        delta = {k: current[k] - prev_counters.get(k, 0) for k in current}
-    return delta, current
+        delta = {k: cur[k] - prev.get(k, 0) for k in cur}
+    return delta, cur
 
 
-def format_bytes(n: int) -> str:
-    for unit in ("B", "KB", "MB", "GB"):
-        if abs(n) < 1024:
-            return f"{n:.1f} {unit}"
-        n /= 1024
-    return f"{n:.1f} TB"
+# ===================================================================
+# Step 1 – LOCAL collect + write
+# ===================================================================
 
+def _collect_local() -> dict:
+    """Gather every metric and return the complete payload dict.
 
-# ---------------------------------------------------------------------------
-# Collect + write (with retry)
-# ---------------------------------------------------------------------------
-
-def collect_metrics() -> dict:
+    Gateway detection and ping are each isolated – a failure in
+    either one produces a safe fallback value, never an exception.
+    """
+    # --- identity ---
     hostname = config.HOSTNAME or socket.gethostname()
-    ping = ping_gateway(_GATEWAY_IP)
-    mem = get_memory_usage()
-    disk = get_disk_usage()
-    net_delta, net_snapshot = get_network_io(_PREV_NET_COUNTERS)
+
+    # --- gateway (double-fault-tolerant) ---
+    try:
+        gw_ip = _detect_gateway() or config.GATEWAY_IP or "0.0.0.0"
+    except Exception:
+        gw_ip = config.GATEWAY_IP or "0.0.0.0"
+    try:
+        ping = _ping_gateway(gw_ip)
+    except Exception:
+        ping = {"reachable": False, "latency_ms": None}
+
+    # --- system metrics (always succeed) ---
+    cpu = _get_cpu()
+    mem = _get_memory()
+    disk = _get_disk()
+    net_delta, net_snap = _get_network(_prev_net)
 
     return {
         "hostname": hostname,
         "platform": platform.system(),
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "agent_version": AGENT_VERSION,
-        "cpu_usage_percent": get_cpu_usage(),
+        "cpu_usage_percent": cpu,
         "memory": mem,
         "disk": disk,
         "network": {
@@ -219,91 +221,130 @@ def collect_metrics() -> dict:
             "packets_recv_delta": net_delta["packets_recv"],
             "errors": net_delta["errin"] + net_delta["errout"],
             "drops": net_delta["dropin"] + net_delta["dropout"],
-            "total_bytes_sent": net_snapshot["bytes_sent"],
-            "total_bytes_recv": net_snapshot["bytes_recv"],
+            "total_bytes_sent": net_snap["bytes_sent"],
+            "total_bytes_recv": net_snap["bytes_recv"],
         },
         "gateway": {
-            "ip": _GATEWAY_IP,
+            "ip": gw_ip,
             "reachable": ping["reachable"],
             "latency_ms": ping["latency_ms"],
         },
     }
 
 
-def write_metrics(payload: dict, path: str, retries: int = 3) -> None:
-    """Write metrics with retry logic.
+def _atomic_write(payload: dict, path: str, retries: int = 3) -> None:
+    """Write *payload* as JSON to *path* atomically with retry.
 
-    Uses tempfile + os.replace for atomicity.  On Windows the target
-    may be momentarily locked by an antivirus scanner or the dashboard
-    process, so we retry with short sleeps.
+    Uses tempfile + os.replace.  Retries on PermissionError /
+    OSError (Windows AV locks, concurrent readers).
     """
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
-    dir_name = os.path.dirname(path) or "."
-
+    target_dir = os.path.dirname(path) or "."
     for attempt in range(1, retries + 1):
-        fd, tmp_path = tempfile.mkstemp(dir=dir_name, suffix=".tmp")
+        fd, tmp = tempfile.mkstemp(dir=target_dir, suffix=".tmp")
         try:
             with os.fdopen(fd, "w", encoding="utf-8") as f:
                 json.dump(payload, f, indent=2)
-            os.replace(tmp_path, path)
-            return  # success
-        except (PermissionError, OSError) as exc:
-            try:
-                os.unlink(tmp_path)
-            except OSError:
-                pass
+            os.replace(tmp, path)
+            return
+        except (PermissionError, OSError):
+            _safe_unlink(tmp)
             if attempt == retries:
                 raise
             time.sleep(0.2 * attempt)
         except BaseException:
-            try:
-                os.unlink(tmp_path)
-            except OSError:
-                pass
+            _safe_unlink(tmp)
             raise
 
 
-# ---------------------------------------------------------------------------
-# Entry point
-# ---------------------------------------------------------------------------
+def _safe_unlink(p: str) -> None:
+    try:
+        os.unlink(p)
+    except OSError:
+        pass
 
-_GATEWAY_IP: str
-_PREV_NET_COUNTERS: dict | None = None
-_HISTORY: collections.deque
+
+def _save_local(payload: dict) -> bool:
+    """Step 1: write payload to LOCAL_FILE.  Returns True on success."""
+    try:
+        _atomic_write(payload, config.LOCAL_FILE)
+        return True
+    except Exception as exc:
+        print(f"[agent] LOCAL write failed: {exc}")
+        return False
+
+
+# ===================================================================
+# Step 2 – SYNC / PUSH to output
+# ===================================================================
+
+def _sync_to_output() -> bool:
+    """Step 2: copy LOCAL_FILE → OUTPUT_FILE (or run SYNC_CMD).
+
+    Returns True on success.  Failures are logged but never crash
+    the agent.
+    """
+    try:
+        if config.SYNC_CMD:
+            result = subprocess.run(
+                config.SYNC_CMD, shell=True, capture_output=True,
+                text=True, timeout=30,
+            )
+            if result.returncode != 0:
+                print(f"[agent] SYNC_CMD failed (rc={result.returncode}): "
+                      f"{result.stderr.strip()[:200]}")
+                return False
+        else:
+            shutil.copy2(config.LOCAL_FILE, config.OUTPUT_FILE)
+        return True
+    except Exception as exc:
+        print(f"[agent] sync failed: {exc}")
+        return False
+
+
+# ===================================================================
+# Main loop
+# ===================================================================
+
+_prev_net: dict | None = None
+_history: collections.deque
 
 
 def main() -> None:
-    global _GATEWAY_IP, _PREV_NET_COUNTERS, _HISTORY
+    global _prev_net, _history
 
-    _HISTORY = collections.deque(maxlen=config.HISTORY_MAX_POINTS)
+    _history = collections.deque(maxlen=config.HISTORY_MAX_POINTS)
 
-    try:
-        _GATEWAY_IP = resolve_gateway()
-    except RuntimeError as exc:
-        print(f"[agent] FATAL: {exc}")
-        sys.exit(1)
-
+    # Seed cpu_percent so the first real reading is meaningful.
     psutil.cpu_percent(interval=None)
 
+    gw_hint = config.GATEWAY_IP or "auto-detect"
     print(
-        f"[agent] v{AGENT_VERSION} starting | gateway {_GATEWAY_IP} | "
+        f"[agent] v{AGENT_VERSION} | "
         f"interval {config.INTERVAL_SECONDS}s | "
-        f"history {config.HISTORY_MAX_POINTS} pts | "
-        f"metrics -> {config.METRICS_FILE}"
+        f"gateway {gw_hint} | "
+        f"local {config.LOCAL_FILE} | "
+        f"output {config.OUTPUT_FILE}"
     )
 
-    consecutive_errors = 0
+    cycle = 0
     while True:
+        cycle += 1
         try:
-            payload = collect_metrics()
-            _PREV_NET_COUNTERS = {
+            # ── Step 1: collect + save locally ────────────────────
+            payload = _collect_local()
+
+            # Update network counter delta baseline (must happen
+            # after collection, before next cycle).
+            _prev_net = {
                 "bytes_sent": payload["network"]["total_bytes_sent"],
                 "bytes_recv": payload["network"]["total_bytes_recv"],
                 "packets_sent": 0, "packets_recv": 0,
                 "errin": 0, "errout": 0, "dropin": 0, "dropout": 0,
             }
 
-            _HISTORY.append({
+            # Append to history ring buffer.
+            _history.append({
                 "timestamp": payload["timestamp"],
                 "cpu": payload["cpu_usage_percent"],
                 "memory": payload["memory"]["percent"],
@@ -313,19 +354,28 @@ def main() -> None:
                 "bytes_recv": payload["network"]["bytes_recv_delta"],
             })
 
-            output = {**payload, "history": list(_HISTORY)}
-            write_metrics(output, config.METRICS_FILE)
+            full_payload = {**payload, "history": list(_history)}
+            local_ok = _save_local(full_payload)
 
-            consecutive_errors = 0
+            # ── Step 2: sync to output ───────────────────────────
+            if local_ok:
+                sync_ok = _sync_to_output()
+            else:
+                sync_ok = False
+
+            # ── log ──────────────────────────────────────────────
             gw = "OK" if payload["gateway"]["reachable"] else "DOWN"
+            sync_tag = "synced" if sync_ok else "sync-FAIL"
             print(
-                f"[agent] CPU {payload['cpu_usage_percent']}% | "
+                f"[agent] #{cycle} | "
+                f"CPU {payload['cpu_usage_percent']}% | "
                 f"RAM {payload['memory']['percent']}% | "
-                f"Disk {payload['disk']['percent']}% | GW {gw}"
+                f"Disk {payload['disk']['percent']}% | "
+                f"GW {gw} | {sync_tag}"
             )
+
         except Exception as exc:
-            consecutive_errors += 1
-            print(f"[agent] error #{consecutive_errors}: {exc}")
+            print(f"[agent] #{cycle} ERROR: {exc}")
 
         time.sleep(config.INTERVAL_SECONDS)
 

@@ -1,0 +1,34 @@
+{
+  "hostname": "DESKTOP-B0D2ETC",
+  "platform": "Windows",
+  "timestamp": "2026-07-22T17:53:33.436139+00:00",
+  "agent_version": "3.0.0",
+  "cpu_usage_percent": 18.8,
+  "memory": {
+    "percent": 75.6,
+    "used_gb": 11.86,
+    "total_gb": 15.69,
+    "available_gb": 3.83
+  },
+  "disk": {
+    "percent": 85.9,
+    "used_gb": 203.89,
+    "total_gb": 237.42,
+    "free_gb": 33.53
+  },
+  "network": {
+    "bytes_sent_delta": 0,
+    "bytes_recv_delta": 0,
+    "packets_sent_delta": 0,
+    "packets_recv_delta": 0,
+    "errors": 0,
+    "drops": 0,
+    "total_bytes_sent": 158052066,
+    "total_bytes_recv": 56417667
+  },
+  "gateway": {
+    "ip": "10.115.124.26",
+    "reachable": true,
+    "latency_ms": 8.0
+  }
+}

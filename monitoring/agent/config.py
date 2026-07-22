@@ -1,34 +1,42 @@
 """
 Configuration for the Hybrid Network Monitoring Agent.
 
-Centralizing these values keeps the agent easy to deploy across many
-clients without touching the collection logic.
+Two-path architecture:
+  LOCAL_FILE  – where the agent writes raw metrics every cycle (fast, local).
+  OUTPUT_FILE – the file the dashboard reads (synced from LOCAL_FILE after
+                every successful local write).
+
+Set the SYNC_CMD env-var to a shell command that copies / pushes OUTPUT_FILE
+(e.g. ``git add … && git commit -m … && git push``).  When unset the agent
+simply copies LOCAL_FILE → OUTPUT_FILE on the same filesystem.
 """
 import os
 
-# Address of the network gateway the agent should ping.
-# Set to None to auto-detect the default gateway from OS routing tables.
+# -- gateway ---------------------------------------------------------------
+# Auto-detect from OS routing tables.  Set to a literal IP only as fallback.
 GATEWAY_IP = None
 
-# How often (in seconds) the agent collects and reports metrics.
+# -- timing ----------------------------------------------------------------
 INTERVAL_SECONDS = 5
-
-# How many historical data points to keep in the ring buffer.
-# At 5 s intervals, 60 points = 5 minutes of history.
-HISTORY_MAX_POINTS = 60
-
-# How many seconds of staleness the dashboard tolerates before marking
-# the agent as disconnected.
+HISTORY_MAX_POINTS = 60        # 60 × 5 s = 5 min of chart data
 STALENESS_THRESHOLD_SECONDS = 30
 
-# Human-friendly name for this host. Falls back to the system hostname.
-HOSTNAME = None  # type: ignore  # set at runtime if left None
-
-# Where the agent writes its latest metrics.  Overridable via the
-# METRICS_FILE environment variable so the path works on both local
-# dev and Streamlit Community Cloud.
-_DEFAULT = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-    "dashboard", "data", "metrics.json",
+# -- paths -----------------------------------------------------------------
+# config.py lives at <repo>/monitoring/agent/config.py  →  3 levels up = repo root.
+_REPO_ROOT = os.path.dirname(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 )
-METRICS_FILE = os.environ.get("METRICS_FILE", _DEFAULT)
+
+# Step 1 target: agent writes here first (always local, always fast).
+LOCAL_FILE = os.path.join(_REPO_ROOT, "monitoring", "agent", "local_metrics.json")
+
+# Step 2 target: dashboard reads here.  Overridable via env-var for cloud.
+DEFAULT_OUTPUT = os.path.join(_REPO_ROOT, "monitoring", "dashboard", "data", "metrics.json")
+OUTPUT_FILE = os.environ.get("METRICS_FILE", DEFAULT_OUTPUT)
+
+# Optional shell command executed after the local write succeeds.
+# When None the agent falls back to a plain shutil.copy2().
+SYNC_CMD = os.environ.get("SYNC_CMD", None)
+
+# -- identity --------------------------------------------------------------
+HOSTNAME = None  # type: ignore  # falls back to socket.gethostname()
