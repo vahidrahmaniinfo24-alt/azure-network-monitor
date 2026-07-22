@@ -13,6 +13,10 @@ GATEWAY_IP = None
 # How often (in seconds) the agent collects and reports metrics.
 INTERVAL_SECONDS = 5
 
+# How many historical data points to keep in the ring buffer.
+# At 5 s intervals, 60 points = 5 minutes of history.
+HISTORY_MAX_POINTS = 60
+
 # Human-friendly name for this host. Falls back to the system hostname.
 HOSTNAME = None  # type: ignore  # set at runtime if left None
 
