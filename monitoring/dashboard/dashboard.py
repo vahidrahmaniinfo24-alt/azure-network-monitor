@@ -1,7 +1,7 @@
 """
 Hybrid Network Monitoring Dashboard (Streamlit).
 
-Reads the latest metrics JSON produced by the Linux agent and renders a
+Reads the latest metrics JSON produced by the agent and renders a
 clean, visual overview of CPU usage and gateway reachability.
 
 Dependencies:
@@ -13,6 +13,7 @@ Run with:
 
 import json
 import os
+from datetime import timedelta
 
 import pandas as pd
 import streamlit as st
@@ -20,7 +21,6 @@ import streamlit as st
 METRICS_FILE = os.path.join(os.path.dirname(__file__), "data", "metrics.json")
 
 
-@st.cache_data(ttl=2)
 def load_metrics() -> dict | None:
     """Load the latest metrics payload, or None if unavailable."""
     if not os.path.exists(METRICS_FILE):
@@ -32,16 +32,9 @@ def load_metrics() -> dict | None:
         return None
 
 
-def main() -> None:
-    st.set_page_config(
-        page_title="Hybrid Network Monitor",
-        page_icon="📡",
-        layout="wide",
-    )
-
-    st.title("📡 Automated Hybrid Network & Monitoring Dashboard")
-    st.caption("Live metrics collected from Linux clients via the Python agent")
-
+@st.fragment(run_every=timedelta(seconds=3))
+def render_live_metrics():
+    """Auto-refreshing fragment that re-reads metrics every 3 s."""
     data = load_metrics()
 
     if data is None:
@@ -49,12 +42,11 @@ def main() -> None:
             "No metrics file found. Start the agent with "
             "`python monitoring/agent/agent.py` so it begins writing data."
         )
-        st.stop()
+        return
 
     gateway = data.get("gateway", {})
     cpu = data.get("cpu_usage_percent", 0.0)
 
-    # --- Top-level status cards ---
     col1, col2, col3 = st.columns(3)
     with col1:
         st.metric("Host", data.get("hostname", "unknown"))
@@ -64,30 +56,40 @@ def main() -> None:
         reachable = gateway.get("reachable", False)
         latency = gateway.get("latency_ms")
         label = "Gateway" if reachable else "Gateway DOWN"
-        value = f"{latency} ms" if latency is not None else "—"
+        value = f"{latency} ms" if latency is not None else "\u2014"
         st.metric(label, value)
 
-    # --- CPU usage visual ---
     st.subheader("CPU Utilization")
     st.progress(min(float(cpu) / 100.0, 1.0))
     st.write(f"Current load: **{cpu}%**")
 
-    # --- Gateway status visual ---
     st.subheader("Gateway Reachability")
     if reachable:
         st.success(
-            f"✅ Gateway {gateway.get('ip')} is reachable "
+            f"Gateway {gateway.get('ip')} is reachable "
             f"(latency {latency} ms)"
         )
     else:
-        st.error(f"❌ Gateway {gateway.get('ip')} is unreachable")
+        st.error(f"Gateway {gateway.get('ip')} is unreachable")
 
-    # --- Raw data table ---
     st.subheader("Raw Metrics")
     df = pd.json_normalize(data)
     st.dataframe(df, use_container_width=True)
 
     st.caption(f"Last updated: {data.get('timestamp', 'unknown')}")
+
+
+def main() -> None:
+    st.set_page_config(
+        page_title="Hybrid Network Monitor",
+        page_icon="\U0001F4E1",
+        layout="wide",
+    )
+
+    st.title("Automated Hybrid Network & Monitoring Dashboard")
+    st.caption("Live metrics collected from clients via the Python agent")
+
+    render_live_metrics()
 
 
 if __name__ == "__main__":
