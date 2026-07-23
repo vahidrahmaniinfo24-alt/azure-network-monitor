@@ -1,0 +1,54 @@
+{
+  "hostname": "DESKTOP-B0D2ETC",
+  "platform": "Windows",
+  "timestamp": "2026-07-23T06:07:57.530262+00:00",
+  "agent_version": "3.0.0",
+  "cpu_usage_percent": 12.8,
+  "memory": {
+    "percent": 50.5,
+    "used_gb": 7.92,
+    "total_gb": 15.69,
+    "available_gb": 7.77
+  },
+  "disk": {
+    "percent": 82.1,
+    "used_gb": 194.86,
+    "total_gb": 237.42,
+    "free_gb": 42.56
+  },
+  "network": {
+    "bytes_sent_delta": 453,
+    "bytes_recv_delta": 468,
+    "packets_sent_delta": 130463,
+    "packets_recv_delta": 238550,
+    "errors": 0,
+    "drops": 0,
+    "total_bytes_sent": 169052389,
+    "total_bytes_recv": 307339031
+  },
+  "gateway": {
+    "ip": "192.168.0.1",
+    "reachable": true,
+    "latency_ms": 43.0
+  },
+  "history": [
+    {
+      "timestamp": "2026-07-23T06:07:52.421583+00:00",
+      "cpu": 8.7,
+      "memory": 49.1,
+      "disk": 82.1,
+      "latency_ms": 5.0,
+      "bytes_sent": 0,
+      "bytes_recv": 0
+    },
+    {
+      "timestamp": "2026-07-23T06:07:57.530262+00:00",
+      "cpu": 12.8,
+      "memory": 50.5,
+      "disk": 82.1,
+      "latency_ms": 43.0,
+      "bytes_sent": 453,
+      "bytes_recv": 468
+    }
+  ]
+}
