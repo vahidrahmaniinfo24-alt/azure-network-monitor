@@ -15,8 +15,12 @@ Run with:
     streamlit run monitoring/dashboard/dashboard.py
 """
 
+import atexit
 import json
 import os
+import signal
+import subprocess
+import sys
 import traceback
 from datetime import datetime, timedelta, timezone
 
@@ -411,12 +415,39 @@ def _history_to_df(history: list[dict]) -> pd.DataFrame:
 # Page entry point
 # ---------------------------------------------------------------------------
 
+def _ensure_agent_running() -> None:
+    """Start the monitoring agent as a subprocess if not already running."""
+    if "_agent_proc" in st.session_state:
+        proc = st.session_state["_agent_proc"]
+        if proc.poll() is None:
+            return
+        del st.session_state["_agent_proc"]
+
+    agent_script = os.path.join(
+        os.path.dirname(__file__), "..", "agent", "agent.py"
+    )
+    agent_script = os.path.normpath(agent_script)
+    if not os.path.isfile(agent_script):
+        return
+
+    proc = subprocess.Popen(
+        [sys.executable, agent_script],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    )
+    st.session_state["_agent_proc"] = proc
+    atexit.register(lambda: proc.terminate())
+
+
 def main() -> None:
     st.set_page_config(
         page_title="Hybrid Network Monitor",
         page_icon=":material/monitoring:",
         layout="wide",
     )
+
+    _ensure_agent_running()
 
     st.title(":material/monitoring: Hybrid network monitor")
     st.caption("Real-time system metrics collected by the Python agent")
